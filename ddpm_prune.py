@@ -56,10 +56,16 @@ batch_size = args.batch_size
 dataset = args.dataset
 
 if __name__=='__main__':
+
+    cifar_transform = T.Compose([
+        T.RandomHorizontalFlip(),
+        T.ToTensor(),
+        T.Normalize(mean=0.5, std=0.5),
+    ])
     
     # loading images for gradient-based pruning
     if args.pruner in ['taylor', 'diff-pruning']:
-        dataset = utils.get_dataset(args.dataset)
+        dataset = utils.get_dataset(args.dataset, transform=cifar_transform)
         print(f"Dataset size: {len(dataset)}")
         train_dataloader = torch.utils.data.DataLoader(
             dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True
