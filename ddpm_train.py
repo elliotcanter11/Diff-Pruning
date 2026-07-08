@@ -333,7 +333,14 @@ def main(args):
     noise_scheduler = pipeline.scheduler
 
     # Get the datasets: you can either provide your own training and evaluation files (see below)
-    dataset = utils.get_dataset(args.dataset)
+    
+    cifar_transform = transforms.Compose([
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=0.5, std=0.5),
+    ])
+    dataset = utils.get_dataset(args.dataset, transform=cifar_transform)
+    
     logger.info(f"Dataset size: {len(dataset)}")
     train_dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=args.train_batch_size, shuffle=True, num_workers=args.dataloader_num_workers
