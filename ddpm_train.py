@@ -24,6 +24,11 @@ import transformers.utils as tf_utils
 if not hasattr(tf_utils, "FLAX_WEIGHTS_NAME"):
     tf_utils.FLAX_WEIGHTS_NAME = "flax_model.msgpack"
 
+import types
+import transformers
+if not hasattr(transformers, "deepspeed"):
+    transformers.deepspeed = types.SimpleNamespace(is_deepspeed_zero3_enabled=lambda: False)
+
 
 import argparse
 import inspect
