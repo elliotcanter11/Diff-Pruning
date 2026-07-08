@@ -29,7 +29,7 @@ from diffusers.models import UNet2DModel
 import torch_pruning as tp
 import torch
 import torchvision
-from torchvision import transforms
+from torchvision import transforms as T
 import torchvision
 from tqdm import tqdm
 import os
