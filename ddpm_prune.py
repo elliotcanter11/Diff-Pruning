@@ -18,6 +18,10 @@ import jax
 if not hasattr(jax.random, "KeyArray"):
     jax.random.KeyArray = jax.Array
 
+import transformers.utils as tf_utils
+if not hasattr(tf_utils, "FLAX_WEIGHTS_NAME"):
+    tf_utils.FLAX_WEIGHTS_NAME = "flax_model.msgpack"
+
 from diffusers import DiffusionPipeline, DDPMPipeline, DDIMPipeline, DDIMScheduler, DDPMScheduler
 
 from diffusers import DiffusionPipeline, DDPMPipeline, DDIMPipeline, DDIMScheduler, DDPMScheduler
