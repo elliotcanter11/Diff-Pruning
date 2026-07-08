@@ -1,3 +1,21 @@
+import huggingface_hub
+from huggingface_hub import constants as hf_constants
+
+if not hasattr(hf_constants, "hf_cache_home"):
+    hf_constants.hf_cache_home = hf_constants.HF_HUB_CACHE
+
+if not hasattr(huggingface_hub, "cached_download"):
+    huggingface_hub.cached_download = huggingface_hub.hf_hub_download
+
+if not hasattr(huggingface_hub, "HfFolder"):
+    class HfFolder:
+        @staticmethod
+        def get_token():
+            return huggingface_hub.get_token()
+    huggingface_hub.HfFolder = HfFolder
+
+from diffusers import DiffusionPipeline, DDPMPipeline, DDIMPipeline, DDIMScheduler, DDPMScheduler
+
 from diffusers import DiffusionPipeline, DDPMPipeline, DDIMPipeline, DDIMScheduler, DDPMScheduler
 from diffusers.models import UNet2DModel
 import torch_pruning as tp
