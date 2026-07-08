@@ -1,5 +1,5 @@
 python ddpm_train.py \
-  --dataset="cifar10" \
+  --dataset="data/cifar10_images" \
   --model_path="run/pruned/ddpm_cifar10_pruned" \
   --pruned_model_ckpt="run/pruned/ddpm_cifar10_pruned/pruned/unet_pruned.pth" \
   --resolution=32 \
