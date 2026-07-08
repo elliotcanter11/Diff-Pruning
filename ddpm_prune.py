@@ -101,12 +101,12 @@ if __name__=='__main__':
 
         ignored_layers = [model.conv_out]
         channel_groups = {}
-        #from diffusers.models.attention import 
-        #for m in model.modules():
-        #    if isinstance(m, AttentionBlock):
-        #        channel_groups[m.query] = m.num_heads
-        #        channel_groups[m.key] = m.num_heads
-        #        channel_groups[m.value] = m.num_heads
+        from diffusers.models.attention_processor import Attention
+        for m in model.modules():
+            if isinstance(m, Attention):
+                channel_groups[m.to_q] = m.heads
+                channel_groups[m.to_k] = m.heads
+                channel_groups[m.to_v] = m.heads
         
         pruner = tp.pruner.MagnitudePruner(
             model,
