@@ -314,7 +314,7 @@ def main(args):
     if os.path.isdir(args.model_path):
         if args.pruned_model_ckpt is not None:
             print("Loading pruned model from {}".format(args.pruned_model_ckpt))
-            unet = torch.load(args.pruned_model_ckpt, map_location='cpu').eval()
+            unet = torch.load(args.pruned_model_ckpt, map_location='cpu', weights_only=False).eval()
         else:
             print("Loading model from {}".format(args.model_path))
             subfolder = 'unet' if os.path.isdir(os.path.join(args.model_path, 'unet')) else None
