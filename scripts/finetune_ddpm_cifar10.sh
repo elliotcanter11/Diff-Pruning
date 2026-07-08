@@ -15,3 +15,4 @@ python ddpm_train.py \
   --ema_max_decay 0.9999 \
   --dropout 0.1 \
   --use_ema \
+  --mixed_precision fp16 \
