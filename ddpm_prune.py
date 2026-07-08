@@ -14,6 +14,10 @@ if not hasattr(huggingface_hub, "HfFolder"):
             return huggingface_hub.get_token()
     huggingface_hub.HfFolder = HfFolder
 
+import jax
+if not hasattr(jax.random, "KeyArray"):
+    jax.random.KeyArray = jax.Array
+
 from diffusers import DiffusionPipeline, DDPMPipeline, DDIMPipeline, DDIMScheduler, DDPMScheduler
 
 from diffusers import DiffusionPipeline, DDPMPipeline, DDIMPipeline, DDIMScheduler, DDPMScheduler
