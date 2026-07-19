@@ -118,51 +118,7 @@ try:
 except OptionalDependencyNotAvailable:
     from .utils.dummy_torch_and_transformers_objects import *  # noqa F403
 else:
-    from .pipelines import (
-        AltDiffusionImg2ImgPipeline,
-        AltDiffusionPipeline,
-        AudioLDMPipeline,
-        CycleDiffusionPipeline,
-        IFImg2ImgPipeline,
-        IFImg2ImgSuperResolutionPipeline,
-        IFInpaintingPipeline,
-        IFInpaintingSuperResolutionPipeline,
-        IFPipeline,
-        IFSuperResolutionPipeline,
-        LDMTextToImagePipeline,
-        PaintByExamplePipeline,
-        SemanticStableDiffusionPipeline,
-        StableDiffusionAttendAndExcitePipeline,
-        StableDiffusionControlNetImg2ImgPipeline,
-        StableDiffusionControlNetInpaintPipeline,
-        StableDiffusionControlNetPipeline,
-        StableDiffusionDepth2ImgPipeline,
-        StableDiffusionDiffEditPipeline,
-        StableDiffusionImageVariationPipeline,
-        StableDiffusionImg2ImgPipeline,
-        StableDiffusionInpaintPipeline,
-        StableDiffusionInpaintPipelineLegacy,
-        StableDiffusionInstructPix2PixPipeline,
-        StableDiffusionLatentUpscalePipeline,
-        StableDiffusionModelEditingPipeline,
-        StableDiffusionPanoramaPipeline,
-        StableDiffusionPipeline,
-        StableDiffusionPipelineSafe,
-        StableDiffusionPix2PixZeroPipeline,
-        StableDiffusionSAGPipeline,
-        StableDiffusionUpscalePipeline,
-        StableUnCLIPImg2ImgPipeline,
-        StableUnCLIPPipeline,
-        TextToVideoSDPipeline,
-        TextToVideoZeroPipeline,
-        UnCLIPImageVariationPipeline,
-        UnCLIPPipeline,
-        VersatileDiffusionDualGuidedPipeline,
-        VersatileDiffusionImageVariationPipeline,
-        VersatileDiffusionPipeline,
-        VersatileDiffusionTextToImagePipeline,
-        VQDiffusionPipeline,
-    )
+    pass  # disabled: not needed for DDPM/DDIM pruning
 
 try:
     if not (is_torch_available() and is_transformers_available() and is_k_diffusion_available()):
@@ -209,21 +165,7 @@ try:
 except OptionalDependencyNotAvailable:
     from .utils.dummy_flax_objects import *  # noqa F403
 else:
-    from .models.controlnet_flax import FlaxControlNetModel
-    from .models.modeling_flax_utils import FlaxModelMixin
-    from .models.unet_2d_condition_flax import FlaxUNet2DConditionModel
-    from .models.vae_flax import FlaxAutoencoderKL
-    from .pipelines import FlaxDiffusionPipeline
-    from .schedulers import (
-        FlaxDDIMScheduler,
-        FlaxDDPMScheduler,
-        FlaxDPMSolverMultistepScheduler,
-        FlaxKarrasVeScheduler,
-        FlaxLMSDiscreteScheduler,
-        FlaxPNDMScheduler,
-        FlaxSchedulerMixin,
-        FlaxScoreSdeVeScheduler,
-    )
+    pass  # disabled: not needed for DDPM/DDIM pruning
 
 
 try:
@@ -232,12 +174,7 @@ try:
 except OptionalDependencyNotAvailable:
     from .utils.dummy_flax_and_transformers_objects import *  # noqa F403
 else:
-    from .pipelines import (
-        FlaxStableDiffusionControlNetPipeline,
-        FlaxStableDiffusionImg2ImgPipeline,
-        FlaxStableDiffusionInpaintPipeline,
-        FlaxStableDiffusionPipeline,
-    )
+    pass  # disabled: not needed for DDPM/DDIM pruning
 
 try:
     if not (is_note_seq_available()):

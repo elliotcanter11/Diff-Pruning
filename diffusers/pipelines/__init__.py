@@ -42,54 +42,7 @@ try:
 except OptionalDependencyNotAvailable:
     from ..utils.dummy_torch_and_transformers_objects import *  # noqa F403
 else:
-    from .alt_diffusion import AltDiffusionImg2ImgPipeline, AltDiffusionPipeline
-    from .audioldm import AudioLDMPipeline
-    from .controlnet import (
-        StableDiffusionControlNetImg2ImgPipeline,
-        StableDiffusionControlNetInpaintPipeline,
-        StableDiffusionControlNetPipeline,
-    )
-    from .deepfloyd_if import (
-        IFImg2ImgPipeline,
-        IFImg2ImgSuperResolutionPipeline,
-        IFInpaintingPipeline,
-        IFInpaintingSuperResolutionPipeline,
-        IFPipeline,
-        IFSuperResolutionPipeline,
-    )
-    from .latent_diffusion import LDMTextToImagePipeline
-    from .paint_by_example import PaintByExamplePipeline
-    from .semantic_stable_diffusion import SemanticStableDiffusionPipeline
-    from .stable_diffusion import (
-        CycleDiffusionPipeline,
-        StableDiffusionAttendAndExcitePipeline,
-        StableDiffusionDepth2ImgPipeline,
-        StableDiffusionDiffEditPipeline,
-        StableDiffusionImageVariationPipeline,
-        StableDiffusionImg2ImgPipeline,
-        StableDiffusionInpaintPipeline,
-        StableDiffusionInpaintPipelineLegacy,
-        StableDiffusionInstructPix2PixPipeline,
-        StableDiffusionLatentUpscalePipeline,
-        StableDiffusionModelEditingPipeline,
-        StableDiffusionPanoramaPipeline,
-        StableDiffusionPipeline,
-        StableDiffusionPix2PixZeroPipeline,
-        StableDiffusionSAGPipeline,
-        StableDiffusionUpscalePipeline,
-        StableUnCLIPImg2ImgPipeline,
-        StableUnCLIPPipeline,
-    )
-    from .stable_diffusion_safe import StableDiffusionPipelineSafe
-    from .text_to_video_synthesis import TextToVideoSDPipeline, TextToVideoZeroPipeline
-    from .unclip import UnCLIPImageVariationPipeline, UnCLIPPipeline
-    from .versatile_diffusion import (
-        VersatileDiffusionDualGuidedPipeline,
-        VersatileDiffusionImageVariationPipeline,
-        VersatileDiffusionPipeline,
-        VersatileDiffusionTextToImagePipeline,
-    )
-    from .vq_diffusion import VQDiffusionPipeline
+    pass  # disabled: not needed for DDPM/DDIM pruning
 
 try:
     if not is_onnx_available():
@@ -128,7 +81,7 @@ try:
 except OptionalDependencyNotAvailable:
     from ..utils.dummy_flax_objects import *  # noqa F403
 else:
-    from .pipeline_flax_utils import FlaxDiffusionPipeline
+    pass  # disabled: not needed for DDPM/DDIM pruning
 
 
 try:
@@ -137,12 +90,7 @@ try:
 except OptionalDependencyNotAvailable:
     from ..utils.dummy_flax_and_transformers_objects import *  # noqa F403
 else:
-    from .controlnet import FlaxStableDiffusionControlNetPipeline
-    from .stable_diffusion import (
-        FlaxStableDiffusionImg2ImgPipeline,
-        FlaxStableDiffusionInpaintPipeline,
-        FlaxStableDiffusionPipeline,
-    )
+    pass  # disabled: not needed for DDPM/DDIM pruning
 try:
     if not (is_transformers_available() and is_torch_available() and is_note_seq_available()):
         raise OptionalDependencyNotAvailable()
