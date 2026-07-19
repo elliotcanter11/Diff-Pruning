@@ -10,7 +10,7 @@ python ddpm_train.py \
   --learning_rate=2e-4 \
   --lr_warmup_steps=0 \
   --save_model_steps 1000 \
-  --dataloader_num_workers 2 \
+  --dataloader_num_workers ${2:-2} \
   --adam_weight_decay 0.00 \
   --ema_max_decay 0.9999 \
   --dropout 0.1 \
