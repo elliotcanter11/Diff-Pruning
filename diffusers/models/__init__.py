@@ -29,7 +29,9 @@ if is_torch_available():
     from .unet_3d_condition import UNet3DConditionModel
     from .vq_model import VQModel
 
-if is_flax_available():
-    from .controlnet_flax import FlaxControlNetModel
-    from .unet_2d_condition_flax import FlaxUNet2DConditionModel
-    from .vae_flax import FlaxAutoencoderKL
+# Flax disabled: not needed for DDPM/DDIM pruning, and Colab's preinstalled JAX
+# is often newer than this vendored Flax code supports.
+# if is_flax_available():
+#     from .controlnet_flax import FlaxControlNetModel
+#     from .unet_2d_condition_flax import FlaxUNet2DConditionModel
+#     from .vae_flax import FlaxAutoencoderKL
