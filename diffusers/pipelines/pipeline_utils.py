@@ -47,7 +47,6 @@ from ..utils import (
     WEIGHTS_NAME,
     BaseOutput,
     deprecate,
-    get_class_from_dynamic_module,
     is_accelerate_available,
     is_accelerate_version,
     is_compiled_module,
@@ -331,6 +330,8 @@ def _get_pipeline_class(class_obj, config, custom_pipeline=None, cache_dir=None,
             custom_pipeline = path.parent.absolute()
         else:
             file_name = CUSTOM_PIPELINE_FILE_NAME
+
+        from ..utils.dynamic_modules_utils import get_class_from_dynamic_module
 
         return get_class_from_dynamic_module(
             custom_pipeline, module_file=file_name, cache_dir=cache_dir, revision=revision
