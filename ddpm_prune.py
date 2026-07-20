@@ -114,7 +114,7 @@ if __name__=='__main__':
             importance=imp,
             iterative_steps=1,
             channel_groups=channel_groups,
-            ch_sparsity=args.pruning_ratio,
+            pruning_ratio=args.pruning_ratio,
             ignored_layers=ignored_layers,
         )
 
