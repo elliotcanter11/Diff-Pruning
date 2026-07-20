@@ -61,7 +61,6 @@ from ..utils import (
 if is_transformers_available():
     import transformers
     from transformers import PreTrainedModel
-    from transformers.utils import FLAX_WEIGHTS_NAME as TRANSFORMERS_FLAX_WEIGHTS_NAME
     from transformers.utils import SAFE_WEIGHTS_NAME as TRANSFORMERS_SAFE_WEIGHTS_NAME
     from transformers.utils import WEIGHTS_NAME as TRANSFORMERS_WEIGHTS_NAME
 
@@ -193,7 +192,7 @@ def variant_compatible_siblings(filenames, variant=None) -> Union[List[os.PathLi
     ]
 
     if is_transformers_available():
-        weight_names += [TRANSFORMERS_WEIGHTS_NAME, TRANSFORMERS_SAFE_WEIGHTS_NAME, TRANSFORMERS_FLAX_WEIGHTS_NAME]
+        weight_names += [TRANSFORMERS_WEIGHTS_NAME, TRANSFORMERS_SAFE_WEIGHTS_NAME]
 
     # model_pytorch, diffusion_model_pytorch, ...
     weight_prefixes = [w.split(".")[0] for w in weight_names]
