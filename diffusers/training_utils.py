@@ -198,7 +198,7 @@ class EMAModel:
         self.optimization_step += 1
 
         # Compute the decay factor for the exponential moving average.
-        decay = self.decay #self.get_decay(self.optimization_step)
+        decay = self.get_decay(self.optimization_step)
         self.cur_decay_value = decay
         one_minus_decay = 1 - decay
 
