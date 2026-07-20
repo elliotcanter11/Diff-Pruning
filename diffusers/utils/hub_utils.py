@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Dict, Optional, Union
 from uuid import uuid4
 
-from huggingface_hub import HfFolder, ModelCard, ModelCardData, hf_hub_download, whoami
+from huggingface_hub import ModelCard, ModelCardData, get_token, hf_hub_download, whoami
 from huggingface_hub.file_download import REGEX_COMMIT_HASH
 from huggingface_hub.utils import (
     EntryNotFoundError,
@@ -91,7 +91,7 @@ def http_user_agent(user_agent: Union[Dict, str, None] = None) -> str:
 
 def get_full_repo_name(model_id: str, organization: Optional[str] = None, token: Optional[str] = None):
     if token is None:
-        token = HfFolder.get_token()
+        token = get_token()
     if organization is None:
         username = whoami(token)["name"]
         return f"{username}/{model_id}"
