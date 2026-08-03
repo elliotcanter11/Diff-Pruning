@@ -46,9 +46,15 @@ parser.add_argument("--save_path", type=str, required=True)
 parser.add_argument("--pruning_ratio", type=float, default=0.3)
 parser.add_argument("--batch_size", type=int, default=128)
 parser.add_argument("--device", type=str, default='cpu')
-parser.add_argument("--pruner", type=str, default='taylor', choices=['taylor', 'random', 'magnitude', 'reinit', 'diff-pruning'])
+parser.add_argument("--pruner", type=str, default='taylor', choices=['taylor', 'random', 'magnitude', 'reinit', 'diff-pruning', 'mi'])
 
 parser.add_argument("--thr", type=float, default=0.05, help="threshold for diff-pruning")
+
+# MI pruner (MIPP-style scalar proxy). Set a weight to 0 to disable that term.
+parser.add_argument("--mi_w_output", type=float, default=1.0, help="weight of the output-MI term (channel vs final predicted noise)")
+parser.add_argument("--mi_w_adjacency", type=float, default=1.0, help="weight of the adjacency-MI term (channel vs next-layer activations)")
+parser.add_argument("--mi_num_batches", type=int, default=16, help="number of calibration forward passes for the MI pruner")
+parser.add_argument("--mi_output_pool", type=int, default=4, help="spatial pool size of the output target for the MI pruner")
 
 args = parser.parse_args()
 
@@ -63,8 +69,8 @@ if __name__=='__main__':
         T.Normalize(mean=0.5, std=0.5),
     ])
     
-    # loading images for gradient-based pruning
-    if args.pruner in ['taylor', 'diff-pruning']:
+    # loading images for gradient-based / activation-based pruning
+    if args.pruner in ['taylor', 'diff-pruning', 'mi']:
         dataset = utils.get_dataset(args.dataset, transform=cifar_transform)
         print(f"Dataset size: {len(dataset)}")
         train_dataloader = torch.utils.data.DataLoader(
@@ -96,6 +102,13 @@ if __name__=='__main__':
             imp = tp.importance.MagnitudeImportance()
         elif args.pruner == 'diff-pruning':
             imp = tp.importance.TaylorImportance(multivariable=False) # a modified version, estimating the accumulated error of weight removal
+        elif args.pruner == 'mi':
+            from mi_importance import MIImportance
+            imp = MIImportance(
+                w_output=args.mi_w_output,
+                w_adjacency=args.mi_w_adjacency,
+                output_pool=args.mi_output_pool,
+            )
         else:
             raise NotImplementedError
 
@@ -136,6 +149,34 @@ if __name__=='__main__':
                 if args.pruner=='diff-pruning':
                     if loss>loss_max: loss_max = loss
                     if loss<loss_max * args.thr: break # taylor expansion over pruned timesteps ( L_t / L_max > thr )
+
+        if args.pruner == 'mi':
+            print("Collecting activations for MI-based pruning...")
+            imp.attach(model, ignored_layers)
+            num_train_timesteps = scheduler.config.num_train_timesteps
+            mi_iter = iter(train_dataloader)
+            with torch.no_grad():
+                for _ in tqdm(range(args.mi_num_batches)):
+                    # pull a FRESH image batch each pass for sample diversity;
+                    # restart the dataloader if we run out.
+                    try:
+                        batch = next(mi_iter)
+                    except StopIteration:
+                        mi_iter = iter(train_dataloader)
+                        batch = next(mi_iter)
+                    if isinstance(batch, (list, tuple)):
+                        batch = batch[0]
+                    batch = batch.to(args.device)
+                    # sample timesteps spread across the full noise schedule so the
+                    # MI estimate is aggregated over noise levels, not one t.
+                    timesteps = torch.randint(
+                        0, num_train_timesteps, (batch.shape[0],), device=batch.device
+                    ).long()
+                    step_noise = torch.randn_like(batch)
+                    noisy_images = scheduler.add_noise(batch, step_noise, timesteps)
+                    model_output = model(noisy_images, timesteps).sample
+                    imp.record_output(model_output)
+            imp.finalize()
 
         for g in pruner.step(interactive=True):
             g.prune()

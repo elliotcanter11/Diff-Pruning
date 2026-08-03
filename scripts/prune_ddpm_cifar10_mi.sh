@@ -1,0 +1,11 @@
+python ddpm_prune.py \
+--dataset data/cifar10_images \
+--model_path pretrained/ddpm_ema_cifar10 \
+--save_path run/pruned/ddpm_cifar10_pruned \
+--pruning_ratio $1 \
+--batch_size 256 \
+--pruner mi \
+--mi_w_output ${2:-1.0} \
+--mi_w_adjacency ${3:-1.0} \
+--mi_num_batches ${4:-16} \
+--device cuda:0 \
