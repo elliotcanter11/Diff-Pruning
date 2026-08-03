@@ -8,4 +8,5 @@ python ddpm_prune.py \
 --mi_w_output ${2:-1.0} \
 --mi_w_adjacency ${3:-1.0} \
 --mi_num_batches ${4:-16} \
+--mi_num_locations ${5:-8} \
 --device cuda:0 \

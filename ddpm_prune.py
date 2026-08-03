@@ -50,11 +50,12 @@ parser.add_argument("--pruner", type=str, default='taylor', choices=['taylor', '
 
 parser.add_argument("--thr", type=float, default=0.05, help="threshold for diff-pruning")
 
-# MI pruner (MIPP-style scalar proxy). Set a weight to 0 to disable that term.
+# MI pruner (closed-form Gaussian conditional MI). Set a weight to 0 to disable that term.
 parser.add_argument("--mi_w_output", type=float, default=1.0, help="weight of the output-MI term (channel vs final predicted noise)")
 parser.add_argument("--mi_w_adjacency", type=float, default=1.0, help="weight of the adjacency-MI term (channel vs next-layer activations)")
-parser.add_argument("--mi_num_batches", type=int, default=16, help="number of calibration forward passes for the MI pruner")
-parser.add_argument("--mi_output_pool", type=int, default=4, help="spatial pool size of the output target for the MI pruner")
+parser.add_argument("--mi_num_batches", type=int, default=16, help="number of calibration forward passes (each = batch_size images) for the MI pruner")
+parser.add_argument("--mi_num_locations", type=int, default=8, help="spatial locations sampled per image (total MI samples = num_batches*batch_size*num_locations)")
+parser.add_argument("--mi_shrinkage", type=float, default=1e-2, help="ridge shrinkage on the covariance for the Gaussian MI estimate")
 
 args = parser.parse_args()
 
@@ -107,7 +108,8 @@ if __name__=='__main__':
             imp = MIImportance(
                 w_output=args.mi_w_output,
                 w_adjacency=args.mi_w_adjacency,
-                output_pool=args.mi_output_pool,
+                num_locations=args.mi_num_locations,
+                shrinkage=args.mi_shrinkage,
             )
         else:
             raise NotImplementedError
@@ -174,8 +176,10 @@ if __name__=='__main__':
                     ).long()
                     step_noise = torch.randn_like(batch)
                     noisy_images = scheduler.add_noise(batch, step_noise, timesteps)
+                    imp.new_pass(batch.shape[0])
                     model_output = model(noisy_images, timesteps).sample
                     imp.record_output(model_output)
+                    imp.record_timesteps(timesteps)
             imp.finalize()
 
         for g in pruner.step(interactive=True):
