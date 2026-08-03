@@ -9,6 +9,7 @@ class UnlabeledImageFolder(torch.utils.data.Dataset):
         self.transform = transform
         for ext in exts:
             self.files.extend(glob(os.path.join(root, '**/*.{}'.format(ext)), recursive=True))
+        self.files.sort()
 
     def __len__(self):
         return len(self.files)

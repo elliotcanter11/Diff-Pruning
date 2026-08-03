@@ -4,6 +4,5 @@ python ddpm_prune.py \
 --save_path run/pruned/ddpm_cifar10_pruned \
 --pruning_ratio $1 \
 --batch_size 128 \
---pruner diff-pruning \
---thr 0.05 \
+--pruner magnitude \
 --device cuda:0 \
