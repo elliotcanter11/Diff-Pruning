@@ -280,6 +280,14 @@ def parse_args():
     return args
 
 def main(args):
+    # fixed seed so finetuning is deterministic across pruning methods -- the only
+    # difference between runs is then the pruned init, not the SGD/data trajectory.
+    import random, numpy as np
+    _seed = 42
+    random.seed(_seed); np.random.seed(_seed); torch.manual_seed(_seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(_seed)
+
     logging_dir = os.path.join(args.output_dir, args.logging_dir)
     accelerator_project_config = ProjectConfiguration()
     accelerator = Accelerator(

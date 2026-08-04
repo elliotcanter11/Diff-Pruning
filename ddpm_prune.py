@@ -55,9 +55,10 @@ parser.add_argument("--mi_w_output", type=float, default=1.0, help="weight of th
 parser.add_argument("--mi_w_adjacency", type=float, default=1.0, help="weight of the adjacency-MI term (channel vs next-layer activations)")
 parser.add_argument("--mi_num_batches", type=int, default=32, help="number of calibration forward passes (each = batch_size images) for the MI pruner")
 parser.add_argument("--mi_num_locations", type=int, default=4, help="spatial locations sampled per image for the adjacency term")
-parser.add_argument("--mi_out_grid", type=int, default=2, help="per-channel gxg pooled descriptor size for the whole-layer output term")
+parser.add_argument("--mi_out_grid", type=int, default=1, help="per-channel gxg pooled descriptor for the whole-layer output term (1=well-conditioned; 2 keeps spatial but needs ~3x more images)")
 parser.add_argument("--mi_out_target_pool", type=int, default=8, help="pooled grid of the output target for the output term")
 parser.add_argument("--mi_shrinkage", type=float, default=1e-2, help="ridge shrinkage on the covariance for the Gaussian MI estimate")
+parser.add_argument("--mi_iters", type=int, default=5, help="greedy pruning steps: MI is re-estimated on the surviving channels between steps (redundancy-correct)")
 
 args = parser.parse_args()
 
@@ -128,11 +129,14 @@ if __name__=='__main__':
                 channel_groups[m.to_k] = m.heads
                 channel_groups[m.to_v] = m.heads
         
+        # MI prunes greedily over several steps (re-estimated between steps);
+        # the other criteria are one-shot.
+        iterative_steps = args.mi_iters if args.pruner == 'mi' else 1
         pruner = tp.pruner.MagnitudePruner(
             model,
             example_inputs,
             importance=imp,
-            iterative_steps=1,
+            iterative_steps=iterative_steps,
             channel_groups=channel_groups,
             pruning_ratio=args.pruning_ratio,
             ignored_layers=ignored_layers,
@@ -157,15 +161,15 @@ if __name__=='__main__':
                     if loss>loss_max: loss_max = loss
                     if loss<loss_max * args.thr: break # taylor expansion over pruned timesteps ( L_t / L_max > thr )
 
-        if args.pruner == 'mi':
-            print("Collecting activations for MI-based pruning...")
+        def mi_calibrate():
+            # collect activations on the CURRENT (possibly partially pruned) model,
+            # so MI is re-estimated on the surviving channels each greedy step.
+            imp.reset()
             imp.attach(model, ignored_layers)
             num_train_timesteps = scheduler.config.num_train_timesteps
             mi_iter = iter(train_dataloader)
             with torch.no_grad():
-                for _ in tqdm(range(args.mi_num_batches)):
-                    # pull a FRESH image batch each pass for sample diversity;
-                    # restart the dataloader if we run out.
+                for _ in range(args.mi_num_batches):
                     try:
                         batch = next(mi_iter)
                     except StopIteration:
@@ -174,8 +178,6 @@ if __name__=='__main__':
                     if isinstance(batch, (list, tuple)):
                         batch = batch[0]
                     batch = batch.to(args.device)
-                    # sample timesteps spread across the full noise schedule so the
-                    # MI estimate is aggregated over noise levels, not one t.
                     timesteps = torch.randint(
                         0, num_train_timesteps, (batch.shape[0],), device=batch.device
                     ).long()
@@ -187,11 +189,17 @@ if __name__=='__main__':
                     imp.record_timesteps(timesteps)
             imp.finalize()
 
-        for g in pruner.step(interactive=True):
-            g.prune()
-
         if args.pruner == 'mi':
+            for k in range(iterative_steps):
+                print(f"MI greedy pruning step {k+1}/{iterative_steps}: "
+                      "re-estimating MI on the current model...")
+                mi_calibrate()
+                for g in pruner.step(interactive=True):
+                    g.prune()
             imp.report_diagnostic()
+        else:
+            for g in pruner.step(interactive=True):
+                g.prune()
 
         # Update static attributes
         from diffusers.models.resnet import Upsample2D, Downsample2D

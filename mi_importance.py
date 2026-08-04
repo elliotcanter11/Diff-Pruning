@@ -121,7 +121,7 @@ class MIImportance(tp.importance.Importance):
     """Grouped Gaussian conditional-MI importance. See module docstring."""
 
     def __init__(self, w_output=1.0, w_adjacency=1.0,
-                 num_locations=4, out_grid=2, out_target_pool=8,
+                 num_locations=4, out_grid=1, out_target_pool=8,
                  shrinkage=1e-2, target_dim_cap=512, num_freqs=4,
                  prune_ratio=0.0, normalizer="mean"):
         self.w_output = w_output
@@ -229,6 +229,22 @@ class MIImportance(tp.importance.Importance):
             for m, ch in self._img_buf.items():
                 self._img_buf[m] = torch.cat(ch, 0) if len(ch) else None
         self._finalized = True
+        return self
+
+    def reset(self):
+        """Clear captured activations (but keep the diagnostic log) so the object
+        can be re-attached and re-calibrated on the current model -- used for
+        greedy/iterative pruning, where MI is recomputed on the surviving
+        channels after each pruning step."""
+        for h in self._handles:
+            h.remove()
+        self._handles = []
+        self._convs = set()
+        self._loc_buf, self._img_buf = {}, {}
+        self._coords_buf, self._loc_t_buf, self._img_t_buf, self._out_buf = [], [], [], []
+        self._loc_cond = self._img_cond = self._out_target = None
+        self._coords = None
+        self._finalized = False
         return self
 
     # ----------------------------------------------------------------- scoring
