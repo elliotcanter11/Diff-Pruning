@@ -53,8 +53,10 @@ parser.add_argument("--thr", type=float, default=0.05, help="threshold for diff-
 # MI pruner (closed-form Gaussian conditional MI). Set a weight to 0 to disable that term.
 parser.add_argument("--mi_w_output", type=float, default=1.0, help="weight of the output-MI term (channel vs final predicted noise)")
 parser.add_argument("--mi_w_adjacency", type=float, default=1.0, help="weight of the adjacency-MI term (channel vs next-layer activations)")
-parser.add_argument("--mi_num_batches", type=int, default=16, help="number of calibration forward passes (each = batch_size images) for the MI pruner")
-parser.add_argument("--mi_num_locations", type=int, default=8, help="spatial locations sampled per image (total MI samples = num_batches*batch_size*num_locations)")
+parser.add_argument("--mi_num_batches", type=int, default=32, help="number of calibration forward passes (each = batch_size images) for the MI pruner")
+parser.add_argument("--mi_num_locations", type=int, default=4, help="spatial locations sampled per image for the adjacency term")
+parser.add_argument("--mi_out_grid", type=int, default=2, help="per-channel gxg pooled descriptor size for the whole-layer output term")
+parser.add_argument("--mi_out_target_pool", type=int, default=8, help="pooled grid of the output target for the output term")
 parser.add_argument("--mi_shrinkage", type=float, default=1e-2, help="ridge shrinkage on the covariance for the Gaussian MI estimate")
 
 args = parser.parse_args()
@@ -109,7 +111,10 @@ if __name__=='__main__':
                 w_output=args.mi_w_output,
                 w_adjacency=args.mi_w_adjacency,
                 num_locations=args.mi_num_locations,
+                out_grid=args.mi_out_grid,
+                out_target_pool=args.mi_out_target_pool,
                 shrinkage=args.mi_shrinkage,
+                prune_ratio=args.pruning_ratio,
             )
         else:
             raise NotImplementedError
@@ -184,6 +189,9 @@ if __name__=='__main__':
 
         for g in pruner.step(interactive=True):
             g.prune()
+
+        if args.pruner == 'mi':
+            imp.report_diagnostic()
 
         # Update static attributes
         from diffusers.models.resnet import Upsample2D, Downsample2D
