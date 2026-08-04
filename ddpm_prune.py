@@ -58,7 +58,6 @@ parser.add_argument("--mi_num_locations", type=int, default=4, help="spatial loc
 parser.add_argument("--mi_out_grid", type=int, default=1, help="per-channel gxg pooled descriptor for the whole-layer output term (1=well-conditioned; 2 keeps spatial but needs ~3x more images)")
 parser.add_argument("--mi_out_target_pool", type=int, default=8, help="pooled grid of the output target for the output term")
 parser.add_argument("--mi_shrinkage", type=float, default=1e-2, help="ridge shrinkage on the covariance for the Gaussian MI estimate")
-parser.add_argument("--mi_iters", type=int, default=5, help="greedy pruning steps: MI is re-estimated on the surviving channels between steps (redundancy-correct)")
 
 args = parser.parse_args()
 
@@ -129,14 +128,13 @@ if __name__=='__main__':
                 channel_groups[m.to_k] = m.heads
                 channel_groups[m.to_v] = m.heads
         
-        # MI prunes greedily over several steps (re-estimated between steps);
-        # the other criteria are one-shot.
-        iterative_steps = args.mi_iters if args.pruner == 'mi' else 1
+        # one-shot prune; the MI importance does its own greedy (redundancy-aware)
+        # elimination internally, so no iterative_steps are needed here.
         pruner = tp.pruner.MagnitudePruner(
             model,
             example_inputs,
             importance=imp,
-            iterative_steps=iterative_steps,
+            iterative_steps=1,
             channel_groups=channel_groups,
             pruning_ratio=args.pruning_ratio,
             ignored_layers=ignored_layers,
@@ -190,16 +188,14 @@ if __name__=='__main__':
             imp.finalize()
 
         if args.pruner == 'mi':
-            for k in range(iterative_steps):
-                print(f"MI greedy pruning step {k+1}/{iterative_steps}: "
-                      "re-estimating MI on the current model...")
-                mi_calibrate()
-                for g in pruner.step(interactive=True):
-                    g.prune()
+            print("Collecting activations for MI-based pruning...")
+            mi_calibrate()
+
+        for g in pruner.step(interactive=True):
+            g.prune()
+
+        if args.pruner == 'mi':
             imp.report_diagnostic()
-        else:
-            for g in pruner.step(interactive=True):
-                g.prune()
 
         # Update static attributes
         from diffusers.models.resnet import Upsample2D, Downsample2D

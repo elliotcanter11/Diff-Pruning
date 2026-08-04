@@ -253,19 +253,53 @@ class MIImportance(tp.importance.Importance):
             return imp / (imp.mean() + _EPS)
         return imp
 
-    def _grouped_cmi(self, X, block, cond, T):
-        """X (M, C*block), cond (M, E), T (M, D) -> (C,) conditional MI per channel."""
-        X, T = _zscore(X), _zscore(T)
-        cond = _zscore(cond)
-        if T.shape[1] > self.target_dim_cap:
-            sel = torch.randperm(T.shape[1], device=T.device)[: self.target_dim_cap]
-            T = T[:, sel]
-        C = X.shape[1] // block
-        Ob = _ridge_inv(torch.cat([X, cond], 1), self.shrinkage)
-        Of = _ridge_inv(torch.cat([X, cond, T], 1), self.shrinkage)
-        base = torch.linalg.slogdet(_diag_blocks(Ob, C, block))[1]
-        full = torch.linalg.slogdet(_diag_blocks(Of, C, block))[1]
-        return (0.5 * (full - base)).clamp(min=0.0)
+    def _prep_cov(self, Xz, cond, T):
+        """Full covariance of [Xz (channel blocks) | cond | T], computed ONCE.
+        The greedy loop then just slices sub-covariances of it -- so removing a
+        channel is cheap (drop its rows/cols) and never re-reads the samples."""
+        Z = torch.cat([Xz, cond, T], dim=1)
+        Zc = Z - Z.mean(0, keepdim=True)
+        Cov = (Zc.t() @ Zc) / (Z.shape[0] - 1)
+        return {'Cov': Cov, 'Cb': Xz.shape[1], 'E': cond.shape[1], 'D': T.shape[1]}
+
+    def _sub_inv(self, Cov, idx):
+        S = Cov.index_select(0, idx).index_select(1, idx)
+        d = S.shape[0]
+        tr = torch.diagonal(S).mean()
+        return torch.linalg.inv(S + self.shrinkage * tr * torch.eye(d, device=S.device, dtype=S.dtype))
+
+    def _greedy(self, terms, C):
+        """True one-at-a-time greedy elimination (the redundancy-correct form,
+        i.e. TERC): repeatedly drop the channel with the LOWEST conditional MI
+        given the channels still kept, recomputing after each removal -- so a
+        channel stops looking redundant the moment its duplicate is gone, and
+        exactly one of a redundant pair survives. Importance = removal order
+        (removed first = least important = pruned first)."""
+        dev = self.device
+        kept = list(range(C))
+        imp = torch.zeros(C, device=dev)
+        order = 0.0
+        while len(kept) > 1:
+            kt = torch.tensor(kept, device=dev)
+            combined = torch.zeros(len(kept), device=dev)
+            for t in terms:
+                b, Cb, E, D, Cov = t['block'], t['Cb'], t['E'], t['D'], t['Cov']
+                xcols = (kt.view(-1, 1) * b + torch.arange(b, device=dev)).reshape(-1)
+                cond_c = torch.arange(Cb, Cb + E, device=dev)
+                t_c = torch.arange(Cb + E, Cb + E + D, device=dev)
+                base_idx = torch.cat([xcols, cond_c])
+                full_idx = torch.cat([base_idx, t_c])
+                nk = len(kept)
+                base = torch.linalg.slogdet(_diag_blocks(self._sub_inv(Cov, base_idx), nk, b))[1]
+                full = torch.linalg.slogdet(_diag_blocks(self._sub_inv(Cov, full_idx), nk, b))[1]
+                cmi = (0.5 * (full - base)).clamp(min=0.0)
+                combined = combined + t['w'] * self._normalize(cmi)
+            j = int(torch.argmin(combined))
+            imp[kept[j]] = order
+            kept.pop(j)
+            order += 1.0
+        imp[kept[0]] = order
+        return self._normalize(imp)
 
     def _mag(self, module, idxs):
         w = module.weight.data
@@ -303,30 +337,32 @@ class MIImportance(tp.importance.Importance):
             return self._magnitude_fallback(group, sorted(set(next(iter(group))[1])))
 
         root_idxs = sorted(set(root_idxs))
+        dev = self.device
         try:
-            total = torch.zeros(len(root_idxs), device=self.device)
-            active = 0.0
-
+            terms = []
             if self.w_adjacency != 0 and consumers and self._loc_buf.get(root) is not None:
-                X = self._loc_buf[root][:, root_idxs].float().to(self.device)
-                T = torch.cat([self._loc_buf[c] for c in consumers], 1).float().to(self.device)
-                imp = self._grouped_cmi(X, 1, self._loc_cond.to(self.device), T)
-                total = total + self.w_adjacency * self._normalize(imp)
-                active += self.w_adjacency
+                Xz = _zscore(self._loc_buf[root][:, root_idxs].float().to(dev))
+                T = torch.cat([self._loc_buf[c] for c in consumers], 1).float().to(dev)
+                if T.shape[1] > self.target_dim_cap:
+                    T = T[:, torch.randperm(T.shape[1], device=dev)[: self.target_dim_cap]]
+                t = self._prep_cov(Xz, _zscore(self._loc_cond.to(dev)), _zscore(T))
+                t['w'], t['block'] = self.w_adjacency, 1
+                terms.append(t)
 
             if self.w_output != 0 and self._img_buf.get(root) is not None and self._out_target is not None:
                 b = self.g * self.g
                 cols = (torch.tensor(root_idxs).view(-1, 1) * b + torch.arange(b)).reshape(-1)
-                X = self._img_buf[root][:, cols].float().to(self.device)
-                imp = self._grouped_cmi(X, b, self._img_cond.to(self.device),
-                                        self._out_target.float().to(self.device))
-                total = total + self.w_output * self._normalize(imp)
-                active += self.w_output
+                Xz = _zscore(self._img_buf[root][:, cols].float().to(dev))
+                t = self._prep_cov(Xz, _zscore(self._img_cond.to(dev)),
+                                   _zscore(self._out_target.float().to(dev)))
+                t['w'], t['block'] = self.w_output, b
+                terms.append(t)
 
-            if active == 0:
+            if not terms:
                 return self._magnitude_fallback(group, root_idxs)
-            self._record_overlap(root, root_idxs, total)
-            return total
+            imp = self._greedy(terms, len(root_idxs))
+            self._record_overlap(root, root_idxs, imp)
+            return imp
         except Exception as e:
             print(f"[MIImportance] group -> magnitude fallback ({type(e).__name__}: {e})")
             return self._magnitude_fallback(group, root_idxs)
