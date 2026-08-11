@@ -4,14 +4,11 @@ Criterion: keep the channels that preserve the mutual information the network
 relies on; remove the channels whose removal costs the least MI. Two terms, each
 toggleable via its weight (0 disables it and skips its capture/compute):
 
-  * adjacency term  -- I(A_L ; A_{L+1}) between a layer and the NEXT layer.
-                       Convolutions are LOCAL, so a region of L most affects the
-                       same region of L+1. We therefore estimate this per spatial
-                       location: samples are (image, pixel), a channel is its raw
-                       value at that pixel, the target is the consumer layer's
-                       values at the SAME location. Conditioned on the other
-                       channels, the timestep t, AND the spatial position (so a
-                       position trend can't masquerade as dependence).
+  * input-information term -- I(A_L ; A_{L-1}) between a convolution's
+  output activation and its PREVIOUS activation (the convolution input).
+  This asks whether a channel carries information from the representation
+  entering the filter bank that is not already carried by the other output
+  channels. We estimate this per spatial location.
 
   * output term     -- I(A_L ; Y) between a layer and the final output (predicted
                        noise). A deep layer's effect on the output is spatially
@@ -141,6 +138,7 @@ class MIImportance(tp.importance.Importance):
 
         # capture buffers
         self._loc_buf = {}     # conv -> (M_loc, C)     per-(image,location) samples
+        self._prev_buf = {}     # conv input  -> (M_loc, C_prev)
         self._img_buf = {}     # conv -> (N_img, C*g*g) per-image pooled descriptors
         self._handles = []
         self._coords = None
@@ -161,7 +159,9 @@ class MIImportance(tp.importance.Importance):
             if m in ignored or not isinstance(m, nn.Conv2d):
                 continue
             self._convs.add(m)
-            self._loc_buf[m], self._img_buf[m] = [], []
+            self._loc_buf[m] = []
+            self._prev_buf[m] = []
+            self._img_buf[m] = []
             self._handles.append(m.register_forward_hook(self._make_hook(m)))
         return self
 
@@ -178,17 +178,31 @@ class MIImportance(tp.importance.Importance):
         idx = (ys * W + xs).unsqueeze(1).expand(B, C, -1)
         g = feat.reshape(B, C, H * W).gather(2, idx)          # (B, C, L)
         return g.permute(0, 2, 1).reshape(B * self.L, C)
-
+    
     def _make_hook(self, module):
         @torch.no_grad()
         def hook(mod, inp, out):
             if out.dim() != 4 or self._coords is None:
                 return
+
             if self.w_adjacency != 0:
-                self._loc_buf[module].append(self._gather(out).detach().half().cpu())
+                # Candidate channels: output of this convolution A1
+                self._loc_buf[module].append(
+                    self._gather(out).detach().half().cpu()
+                )
+
+                # Previous activation: input to this convolution A0
+                if isinstance(inp, tuple) and len(inp) > 0 and inp[0].dim() == 4:
+                    self._prev_buf[module].append(
+                        self._gather(inp[0]).detach().half().cpu()
+                    )
+
             if self.w_output != 0:
-                d = F.adaptive_avg_pool2d(out, self.g)         # (B, C, g, g)
-                self._img_buf[module].append(d.reshape(d.shape[0], -1).detach().half().cpu())
+                d = F.adaptive_avg_pool2d(out, self.g)
+                self._img_buf[module].append(
+                    d.reshape(d.shape[0], -1).detach().half().cpu()
+                )
+
         return hook
 
     @torch.no_grad()
@@ -222,6 +236,8 @@ class MIImportance(tp.importance.Importance):
                                         _loc_embedding(coords)], dim=1)
             for m, ch in self._loc_buf.items():
                 self._loc_buf[m] = torch.cat(ch, 0) if len(ch) else None
+            for m, ch in self._prev_buf.items():
+                self._prev_buf[m] = torch.cat(ch, 0) if len(ch) else None
         if self.w_output != 0 and len(self._img_t_buf):
             it = torch.cat(self._img_t_buf) / t_max
             self._img_cond = _timestep_embedding(it, self.num_freqs)
@@ -240,7 +256,7 @@ class MIImportance(tp.importance.Importance):
             h.remove()
         self._handles = []
         self._convs = set()
-        self._loc_buf, self._img_buf = {}, {}
+        self._loc_buf, self._prev_buf, self._img_buf = {}, {}, {}
         self._coords_buf, self._loc_t_buf, self._img_t_buf, self._out_buf = [], [], [], []
         self._loc_cond = self._img_cond = self._out_target = None
         self._coords = None
@@ -326,13 +342,11 @@ class MIImportance(tp.importance.Importance):
     @torch.no_grad()
     def __call__(self, group, ch_groups=1, **kwargs):
         assert self._finalized, "call finalize() after the calibration loop"
-        root, root_idxs, consumers = None, None, []
+        root, root_idxs = None, None
         for dep, idxs in group:
             layer = dep.target.module
             if dep.handler in self._out_fns and root is None and layer in self._convs:
                 root, root_idxs = layer, idxs
-            elif dep.handler in self._in_fns and layer in self._convs:
-                consumers.append(layer)
         if root is None:
             return self._magnitude_fallback(group, sorted(set(next(iter(group))[1])))
 
@@ -340,12 +354,30 @@ class MIImportance(tp.importance.Importance):
         dev = self.device
         try:
             terms = []
-            if self.w_adjacency != 0 and consumers and self._loc_buf.get(root) is not None:
-                Xz = _zscore(self._loc_buf[root][:, root_idxs].float().to(dev))
-                T = torch.cat([self._loc_buf[c] for c in consumers], 1).float().to(dev)
+            if (
+                self.w_adjacency != 0
+                and self._loc_buf.get(root) is not None
+                and self._prev_buf.get(root) is not None
+            ):
+                # X = candidate channels in the current activation A1
+                Xz = _zscore(
+                    self._loc_buf[root][:, root_idxs].float().to(dev)
+                )
+
+                # T = previous activation A0, i.e. the input to this convolution
+                T = self._prev_buf[root].float().to(dev)
+
+                # Keep the target dimensionality manageable.
+                # This is analogous to the previous target-dimension cap.
                 if T.shape[1] > self.target_dim_cap:
                     T = T[:, torch.randperm(T.shape[1], device=dev)[: self.target_dim_cap]]
-                t = self._prep_cov(Xz, _zscore(self._loc_cond.to(dev)), _zscore(T))
+
+                t = self._prep_cov(
+                    Xz,
+                    _zscore(self._loc_cond.to(dev)),
+                    _zscore(T)
+                )
+
                 t['w'], t['block'] = self.w_adjacency, 1
                 terms.append(t)
 
