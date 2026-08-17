@@ -106,11 +106,13 @@ if __name__=='__main__':
         elif args.pruner == 'diff-pruning':
             imp = tp.importance.TaylorImportance(multivariable=False) # a modified version, estimating the accumulated error of weight removal
         elif args.pruner == 'mi':
-            from mi_importance import MIImportance
+            from mi_importance2 import MIImportance
             imp = MIImportance(
                 w_output=args.mi_w_output,
                 w_adjacency=args.mi_w_adjacency,
+                w_intermediate=args.mi_w_intermediate,
                 num_locations=args.mi_num_locations,
+                mid_lookahead=args.mi_mid_lookahead,
                 out_grid=args.mi_out_grid,
                 out_target_pool=args.mi_out_target_pool,
                 shrinkage=args.mi_shrinkage,
