@@ -58,6 +58,10 @@ parser.add_argument("--mi_num_locations", type=int, default=4, help="spatial loc
 parser.add_argument("--mi_out_grid", type=int, default=1, help="per-channel gxg pooled descriptor for the whole-layer output term (1=well-conditioned; 2 keeps spatial but needs ~3x more images)")
 parser.add_argument("--mi_out_target_pool", type=int, default=8, help="pooled grid of the output target for the output term")
 parser.add_argument("--mi_shrinkage", type=float, default=1e-2, help="ridge shrinkage on the covariance for the Gaussian MI estimate")
+parser.add_argument("--mi_w_intermediate", type=float, default=1.0,
+                    help="weight of the mid-range MI term (channel vs intermediate downstream representation)")
+parser.add_argument("--mi_mid_lookahead", type=int, default=2,
+                    help="number of layers ahead used for the mid-range MI term")
 
 args = parser.parse_args()
 
