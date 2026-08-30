@@ -202,7 +202,7 @@ if __name__=='__main__':
         for m in model.modules():
             if isinstance(m, (Upsample2D, Downsample2D)):
                 m.channels = m.conv.in_channels
-                m.out_channels == m.conv.out_channels
+                m.out_channels = m.conv.out_channels
 
         macs, params = tp.utils.count_ops_and_params(model, example_inputs)
         print(model)
