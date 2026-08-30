@@ -53,8 +53,10 @@ parser.add_argument("--thr", type=float, default=0.05, help="threshold for diff-
 # MI pruner (closed-form Gaussian conditional MI). Set a weight to 0 to disable that term.
 parser.add_argument("--mi_w_output", type=float, default=1.0, help="weight of the output-MI term (channel vs final predicted noise)")
 parser.add_argument("--mi_w_adjacency", type=float, default=1.0, help="weight of the adjacency-MI term (channel vs next-layer activations)")
+parser.add_argument("--mi_w_mid", type=float, default=1.0, help="weight of the mid-range-MI term (channel vs a layer halfway to the output)")
+parser.add_argument("--mi_mid_alpha", type=float, default=0.5, help="how far downstream the mid-range target sits, as a fraction of the remaining depth")
 parser.add_argument("--mi_num_batches", type=int, default=32, help="number of calibration forward passes (each = batch_size images) for the MI pruner")
-parser.add_argument("--mi_num_locations", type=int, default=4, help="spatial locations sampled per image for the adjacency term")
+parser.add_argument("--mi_num_locations", type=int, default=4, help="spatial locations sampled per image for the adjacency and mid-range terms")
 parser.add_argument("--mi_out_grid", type=int, default=1, help="per-channel gxg pooled descriptor for the whole-layer output term (1=well-conditioned; 2 keeps spatial but needs ~3x more images)")
 parser.add_argument("--mi_out_target_pool", type=int, default=8, help="pooled grid of the output target for the output term")
 parser.add_argument("--mi_shrinkage", type=float, default=1e-2, help="ridge shrinkage on the covariance for the Gaussian MI estimate")
@@ -110,6 +112,8 @@ if __name__=='__main__':
             imp = MIImportance(
                 w_output=args.mi_w_output,
                 w_adjacency=args.mi_w_adjacency,
+                w_mid=args.mi_w_mid,
+                mid_alpha=args.mi_mid_alpha,
                 num_locations=args.mi_num_locations,
                 out_grid=args.mi_out_grid,
                 out_target_pool=args.mi_out_target_pool,

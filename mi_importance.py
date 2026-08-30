@@ -1,8 +1,9 @@
 """Mutual-information-based pruning importance for diffusion U-Nets.
 
 Criterion: keep the channels that preserve the mutual information the network
-relies on; remove the channels whose removal costs the least MI. Two terms, each
-toggleable via its weight (0 disables it and skips its capture/compute):
+relies on; remove the channels whose removal costs the least MI. Three terms at
+three ranges, each toggleable via its weight (0 disables it and skips its
+capture/compute):
 
   * adjacency term  -- I(A_L ; A_{L+1}) between a layer and the NEXT layer.
                        Convolutions are LOCAL, so a region of L most affects the
@@ -13,12 +14,26 @@ toggleable via its weight (0 disables it and skips its capture/compute):
                        channels, the timestep t, AND the spatial position (so a
                        position trend can't masquerade as dependence).
 
+  * mid-range term  -- I(A_L ; A_M) between a layer and a layer roughly HALFWAY
+                       between it and the output in forward order (mid_alpha of
+                       the remaining depth). The target is defined RELATIVE to
+                       the layer, not as a fixed anchor such as the bottleneck:
+                       MI is symmetric, so an anchor upstream of a decoder layer
+                       would measure what that layer INHERITED rather than what
+                       it CONTRIBUTES. Halfway-to-output is downstream on both
+                       sides of the bottleneck, and for early encoder layers it
+                       lands near the bottleneck anyway. Same per-location form
+                       (and the same captured buffers) as the adjacency term.
+
   * output term     -- I(A_L ; Y) between a layer and the final output (predicted
                        noise). A deep layer's effect on the output is spatially
                        diffuse, NOT local, so this term is WHOLE-LAYER, per image:
                        samples are images, a channel is a coarse gxg pooled
                        descriptor of its map, the target is the whole (pooled)
                        output. Conditioned on the other channels and t.
+
+Together they form a multiscale ladder over lookahead distance: k=1 (adjacency),
+k~half the remaining depth (mid-range), k=infinity (output).
 
 Estimator -- closed-form GAUSSIAN CONDITIONAL mutual information (grouped).
 
@@ -120,12 +135,14 @@ def _spearman(a, b):
 class MIImportance(tp.importance.Importance):
     """Grouped Gaussian conditional-MI importance. See module docstring."""
 
-    def __init__(self, w_output=1.0, w_adjacency=1.0,
+    def __init__(self, w_output=1.0, w_adjacency=1.0, w_mid=1.0,
                  num_locations=4, out_grid=1, out_target_pool=8,
                  shrinkage=1e-2, target_dim_cap=512, num_freqs=4,
-                 prune_ratio=0.0, normalizer="mean"):
+                 mid_alpha=0.5, prune_ratio=0.0, normalizer="mean"):
         self.w_output = w_output
         self.w_adjacency = w_adjacency
+        self.w_mid = w_mid
+        self.mid_alpha = mid_alpha            # fraction of the remaining depth
         self.L = num_locations
         self.g = out_grid                     # per-channel gxg descriptor (output term)
         self.out_pool = out_target_pool       # output target pooled to this grid
@@ -142,6 +159,7 @@ class MIImportance(tp.importance.Importance):
         # capture buffers
         self._loc_buf = {}     # conv -> (M_loc, C)     per-(image,location) samples
         self._img_buf = {}     # conv -> (N_img, C*g*g) per-image pooled descriptors
+        self._order = {}       # conv -> forward-execution index (for the mid term)
         self._handles = []
         self._coords = None
         self._coords_buf, self._loc_t_buf, self._img_t_buf, self._out_buf = [], [], [], []
@@ -179,12 +197,19 @@ class MIImportance(tp.importance.Importance):
         g = feat.reshape(B, C, H * W).gather(2, idx)          # (B, C, L)
         return g.permute(0, 2, 1).reshape(B * self.L, C)
 
+    @property
+    def _want_loc(self):
+        """The adjacency and mid-range terms share the per-location buffers."""
+        return self.w_adjacency != 0 or self.w_mid != 0
+
     def _make_hook(self, module):
         @torch.no_grad()
         def hook(mod, inp, out):
             if out.dim() != 4 or self._coords is None:
                 return
-            if self.w_adjacency != 0:
+            if module not in self._order:
+                self._order[module] = len(self._order)
+            if self._want_loc:
                 self._loc_buf[module].append(self._gather(out).detach().half().cpu())
             if self.w_output != 0:
                 d = F.adaptive_avg_pool2d(out, self.g)         # (B, C, g, g)
@@ -201,7 +226,7 @@ class MIImportance(tp.importance.Importance):
     @torch.no_grad()
     def record_timesteps(self, timesteps):
         t = timesteps.detach().reshape(-1).float().cpu()
-        if self.w_adjacency != 0:
+        if self._want_loc:
             self._loc_t_buf.append(t.repeat_interleave(self.L))
             self._coords_buf.append(self._coords.reshape(-1, 2).cpu())
         if self.w_output != 0:
@@ -215,7 +240,7 @@ class MIImportance(tp.importance.Importance):
         all_t = self._loc_t_buf + self._img_t_buf
         t_max = float(torch.cat(all_t).max()) + 1.0 if len(all_t) else 1.0
 
-        if self.w_adjacency != 0 and len(self._loc_t_buf):
+        if self._want_loc and len(self._loc_t_buf):
             lt = torch.cat(self._loc_t_buf) / t_max
             coords = torch.cat(self._coords_buf)
             self._loc_cond = torch.cat([_timestep_embedding(lt, self.num_freqs),
@@ -240,7 +265,7 @@ class MIImportance(tp.importance.Importance):
             h.remove()
         self._handles = []
         self._convs = set()
-        self._loc_buf, self._img_buf = {}, {}
+        self._loc_buf, self._img_buf, self._order = {}, {}, {}
         self._coords_buf, self._loc_t_buf, self._img_t_buf, self._out_buf = [], [], [], []
         self._loc_cond = self._img_cond = self._out_target = None
         self._coords = None
@@ -323,6 +348,33 @@ class MIImportance(tp.importance.Importance):
         jac = len(mi_cut & mag_cut) / len(mi_cut | mag_cut)
         self._diag.append((len(idxs), jac, _spearman(mi_imp, mag)))
 
+    def _mid_target(self, root):
+        """The conv roughly `mid_alpha` of the way from `root` to the output in
+        forward-execution order -- i.e. downstream of root on BOTH sides of the
+        bottleneck, unlike a fixed anchor. None for the last few layers, whose
+        mid-range and output targets coincide."""
+        ordered = [m for m, _ in sorted(self._order.items(), key=lambda kv: kv[1])
+                   if self._loc_buf.get(m) is not None]
+        if root not in ordered:
+            return None
+        i, n = ordered.index(root), len(ordered)
+        j = i + max(1, math.ceil(self.mid_alpha * (n - 1 - i)))
+        return ordered[j] if j < n else None
+
+    def _loc_term(self, root, root_idxs, targets, w):
+        """Per-location Gaussian CMI term: X = root's channels at the sampled
+        locations, target = `targets`' values at the SAME (normalised) locations.
+        Shared by the adjacency and mid-range terms -- they differ only in how
+        far downstream the target layer sits."""
+        dev = self.device
+        Xz = _zscore(self._loc_buf[root][:, root_idxs].float().to(dev))
+        T = torch.cat([self._loc_buf[m] for m in targets], 1).float().to(dev)
+        if T.shape[1] > self.target_dim_cap:
+            T = T[:, torch.randperm(T.shape[1], device=dev)[: self.target_dim_cap]]
+        t = self._prep_cov(Xz, _zscore(self._loc_cond.to(dev)), _zscore(T))
+        t['w'], t['block'] = w, 1
+        return t
+
     @torch.no_grad()
     def __call__(self, group, ch_groups=1, **kwargs):
         assert self._finalized, "call finalize() after the calibration loop"
@@ -340,14 +392,16 @@ class MIImportance(tp.importance.Importance):
         dev = self.device
         try:
             terms = []
-            if self.w_adjacency != 0 and consumers and self._loc_buf.get(root) is not None:
-                Xz = _zscore(self._loc_buf[root][:, root_idxs].float().to(dev))
-                T = torch.cat([self._loc_buf[c] for c in consumers], 1).float().to(dev)
-                if T.shape[1] > self.target_dim_cap:
-                    T = T[:, torch.randperm(T.shape[1], device=dev)[: self.target_dim_cap]]
-                t = self._prep_cov(Xz, _zscore(self._loc_cond.to(dev)), _zscore(T))
-                t['w'], t['block'] = self.w_adjacency, 1
-                terms.append(t)
+            has_loc = self._loc_buf.get(root) is not None
+            if self.w_adjacency != 0 and has_loc:
+                tgts = [c for c in consumers if self._loc_buf.get(c) is not None]
+                if tgts:
+                    terms.append(self._loc_term(root, root_idxs, tgts, self.w_adjacency))
+
+            if self.w_mid != 0 and has_loc:
+                mid = self._mid_target(root)
+                if mid is not None:
+                    terms.append(self._loc_term(root, root_idxs, [mid], self.w_mid))
 
             if self.w_output != 0 and self._img_buf.get(root) is not None and self._out_target is not None:
                 b = self.g * self.g

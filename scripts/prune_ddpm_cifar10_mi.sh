@@ -7,6 +7,7 @@ python ddpm_prune.py \
 --pruner mi \
 --mi_w_output ${2:-1.0} \
 --mi_w_adjacency ${3:-1.0} \
---mi_num_batches ${4:-32} \
---mi_num_locations ${5:-4} \
+--mi_w_mid ${4:-1.0} \
+--mi_num_batches ${5:-32} \
+--mi_num_locations ${6:-4} \
 --device cuda:0 \
