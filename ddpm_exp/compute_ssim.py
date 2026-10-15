@@ -37,12 +37,13 @@ loader2 = torch.utils.data.DataLoader(
 )
 
 with torch.no_grad():
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     ssim_list = []
     mse_list = []
     for i, (img1, img2) in tqdm(enumerate(zip(loader1, loader2))):
-        ssim = pytorch_msssim.ssim(img1.cuda(), img2.cuda(), data_range=1.0, size_average=False)
+        ssim = pytorch_msssim.ssim(img1.to(device), img2.to(device), data_range=1.0, size_average=False)
         ssim_list.append(ssim.cpu())
-        mse = torch.nn.functional.mse_loss(img1.cuda(), img2.cuda(), reduction='none').mean(dim=(1,2,3))
+        mse = torch.nn.functional.mse_loss(img1.to(device), img2.to(device), reduction='none').mean(dim=(1,2,3))
         mse_list.append(mse.cpu())
 
     ssim = torch.cat(ssim_list, dim=0)

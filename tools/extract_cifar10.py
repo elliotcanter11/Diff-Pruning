@@ -15,6 +15,10 @@ save_path = os.path.join(args.output, 'cifar10_images')
 if not os.path.exists(save_path):
     os.makedirs(save_path)
 
+if len(os.listdir(save_path)) >= 50000:
+    print(f"Dataset already extracted ({len(os.listdir(save_path))} images in {save_path}). Skipping.")
+    exit(0)
+
 # Load the CIFAR10 dataset
 dataset = CIFAR10(root=args.output, train=True, download=True)
 

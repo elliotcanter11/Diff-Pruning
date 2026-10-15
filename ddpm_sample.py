@@ -56,26 +56,30 @@ if __name__ == "__main__":
     os.makedirs(save_sub_dir, exist_ok=True)
     generator = torch.Generator(device=pipeline.device).manual_seed(args.seed+accelerator.process_index)
 
-    # Set up progress bar
-    if not accelerator.is_main_process:
-        pipeline.set_progress_bar_config(disable=True)
+    # Disable inner diffusers per-step progress bar so only the outer batch progress bar is shown
+    pipeline.set_progress_bar_config(disable=True)
     
     # Sampling
     accelerator.wait_for_everyone()
     with torch.no_grad():
-        # num_batches of each process
-        num_batches = (args.total_samples) // (args.batch_size * accelerator.num_processes)
+        import math
+        num_batches = math.ceil(args.total_samples / (args.batch_size * accelerator.num_processes))
         if accelerator.is_main_process:
-            print("Samping {}x{}={} images with {} process(es)".format(num_batches*args.batch_size, accelerator.num_processes, num_batches*accelerator.num_processes*args.batch_size, accelerator.num_processes))
-        for i in tqdm(range(num_batches), disable=not accelerator.is_main_process):
+            print(f"Sampling {args.total_samples} images with {accelerator.num_processes} process(es)...")
+        saved_count = 0
+        for i in tqdm(range(num_batches), disable=not accelerator.is_main_process, desc="Sampling batches"):
             images = pipeline(batch_size=args.batch_size, num_inference_steps=args.ddim_steps, generator=generator).images
             for j, image in enumerate(images):
-                filename = os.path.join(save_sub_dir, f"{i * args.batch_size + j}.png")
+                idx = i * args.batch_size + j
+                if idx >= args.total_samples:
+                    break
+                filename = os.path.join(save_sub_dir, f"{idx}.png")
                 image.save(filename)
+                saved_count += 1
 
     # Finished
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        accelerator.print(f"Saved {num_batches*accelerator.num_processes*args.batch_size} samples to {args.output_dir}")
+        accelerator.print(f"Saved {saved_count} samples to {args.output_dir}")
     #accelerator.end_training()
     

@@ -14,13 +14,19 @@ if not hasattr(huggingface_hub, "HfFolder"):
             return huggingface_hub.get_token()
     huggingface_hub.HfFolder = HfFolder
 
-import jax
-if not hasattr(jax.random, "KeyArray"):
-    jax.random.KeyArray = jax.Array
+try:
+    import jax
+    if not hasattr(jax.random, "KeyArray"):
+        jax.random.KeyArray = jax.Array
+except ImportError:
+    pass
 
-import transformers.utils as tf_utils
-if not hasattr(tf_utils, "FLAX_WEIGHTS_NAME"):
-    tf_utils.FLAX_WEIGHTS_NAME = "flax_model.msgpack"
+try:
+    import transformers.utils as tf_utils
+    if not hasattr(tf_utils, "FLAX_WEIGHTS_NAME"):
+        tf_utils.FLAX_WEIGHTS_NAME = "flax_model.msgpack"
+except ImportError:
+    pass
 
 from diffusers import DiffusionPipeline, DDPMPipeline, DDIMPipeline, DDIMScheduler, DDPMScheduler
 
@@ -232,10 +238,12 @@ if __name__=='__main__':
         unet = model,
         scheduler = DDIMScheduler.from_pretrained(args.save_path, subfolder="scheduler")
     )
+    pipeline.set_progress_bar_config(disable=True)
     with torch.no_grad():
         generator = torch.Generator(device=pipeline.device).manual_seed(0)
-        pipeline.to("cuda")
-        images = pipeline(num_inference_steps=100, batch_size=args.batch_size, generator=generator, output_type="numpy").images
+        pipeline.to(args.device)
+        vis_batch_size = min(args.batch_size, 64)
+        images = pipeline(num_inference_steps=100, batch_size=vis_batch_size, generator=generator, output_type="numpy").images
         os.makedirs(os.path.join(args.save_path, 'vis'), exist_ok=True)
         torchvision.utils.save_image(torch.from_numpy(images).permute([0, 3, 1, 2]), "{}/vis/after_pruning.png".format(args.save_path))
         

@@ -10,4 +10,4 @@ python ddpm_prune.py \
 --mi_w_mid ${4:-1.0} \
 --mi_num_batches ${5:-32} \
 --mi_num_locations ${6:-4} \
---device cuda:0 \
+--device ${7:-cuda:0}

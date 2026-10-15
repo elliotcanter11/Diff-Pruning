@@ -5,4 +5,4 @@ python ddpm_prune.py \
 --pruning_ratio $1 \
 --batch_size 128 \
 --pruner magnitude \
---device cuda:0 \
+--device ${2:-cuda:0}

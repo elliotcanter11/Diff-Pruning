@@ -16,18 +16,23 @@ if not hasattr(huggingface_hub, "HfFolder"):
             return huggingface_hub.get_token()
     huggingface_hub.HfFolder = HfFolder
 
-import jax
-if not hasattr(jax.random, "KeyArray"):
-    jax.random.KeyArray = jax.Array
+try:
+    import jax
+    if not hasattr(jax.random, "KeyArray"):
+        jax.random.KeyArray = jax.Array
+except ImportError:
+    pass
 
-import transformers.utils as tf_utils
-if not hasattr(tf_utils, "FLAX_WEIGHTS_NAME"):
-    tf_utils.FLAX_WEIGHTS_NAME = "flax_model.msgpack"
-
-import types
-import transformers
-if not hasattr(transformers, "deepspeed"):
-    transformers.deepspeed = types.SimpleNamespace(is_deepspeed_zero3_enabled=lambda: False)
+try:
+    import transformers.utils as tf_utils
+    if not hasattr(tf_utils, "FLAX_WEIGHTS_NAME"):
+        tf_utils.FLAX_WEIGHTS_NAME = "flax_model.msgpack"
+    import types
+    import transformers
+    if not hasattr(transformers, "deepspeed"):
+        transformers.deepspeed = types.SimpleNamespace(is_deepspeed_zero3_enabled=lambda: False)
+except ImportError:
+    pass
 
 
 import argparse
@@ -437,6 +442,7 @@ def main(args):
             scheduler=DDIMScheduler(num_train_timesteps=args.ddpm_num_steps)
         )
         pipeline.scheduler.set_timesteps(args.ddim_num_inference_steps)
+        pipeline.set_progress_bar_config(disable=True)
         images = pipeline(
             batch_size=args.eval_batch_size,
             num_inference_steps=args.ddim_num_inference_steps,
@@ -549,6 +555,7 @@ def main(args):
                         scheduler=DDIMScheduler(num_train_timesteps=args.ddpm_num_steps)
                     )
                     pipeline.scheduler.set_timesteps(args.ddim_num_inference_steps)
+                    pipeline.set_progress_bar_config(disable=True)
                     images = pipeline(
                         batch_size=args.eval_batch_size,
                         num_inference_steps=args.ddim_num_inference_steps,
@@ -575,13 +582,40 @@ def main(args):
                         )
                     del unet
                     del pipeline
-            if global_step>args.num_iters:
+            if global_step >= args.num_iters:
                 progress_bar.close()
                 accelerator.wait_for_everyone()
+                if accelerator.is_main_process:
+                    # ensure final checkpoint is saved even if num_iters is not a multiple of save_model_steps
+                    final_unet = accelerator.unwrap_model(model).eval()
+                    final_unet.zero_grad()
+                    os.makedirs(os.path.join(args.output_dir, 'pruned'), exist_ok=True)
+                    torch.save(final_unet, os.path.join(args.output_dir, 'pruned', 'unet_pruned.pth'))
+                    if args.use_ema:
+                        ema_model.store(final_unet.parameters())
+                        ema_model.copy_to(final_unet.parameters())
+                        torch.save(final_unet, os.path.join(args.output_dir, 'pruned', 'unet_ema_pruned.pth'))
+                        ema_model.restore(final_unet.parameters())
+                    final_pipe = DDPMPipeline(unet=final_unet, scheduler=noise_scheduler)
+                    final_pipe.save_pretrained(args.output_dir)
+                    del final_unet, final_pipe
                 accelerator.end_training()
                 return
         progress_bar.close()
         accelerator.wait_for_everyone()
+    if accelerator.is_main_process:
+        final_unet = accelerator.unwrap_model(model).eval()
+        final_unet.zero_grad()
+        os.makedirs(os.path.join(args.output_dir, 'pruned'), exist_ok=True)
+        torch.save(final_unet, os.path.join(args.output_dir, 'pruned', 'unet_pruned.pth'))
+        if args.use_ema:
+            ema_model.store(final_unet.parameters())
+            ema_model.copy_to(final_unet.parameters())
+            torch.save(final_unet, os.path.join(args.output_dir, 'pruned', 'unet_ema_pruned.pth'))
+            ema_model.restore(final_unet.parameters())
+        final_pipe = DDPMPipeline(unet=final_unet, scheduler=noise_scheduler)
+        final_pipe.save_pretrained(args.output_dir)
+        del final_unet, final_pipe
     accelerator.end_training()
 
 

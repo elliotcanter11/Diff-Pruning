@@ -12,6 +12,10 @@ os.makedirs(args.output, exist_ok=True)
 save_path = os.path.join(args.output, 'cifar10_images')
 os.makedirs(save_path, exist_ok=True)
 
+if len(os.listdir(save_path)) >= 50000:
+    print(f"Dataset already extracted ({len(os.listdir(save_path))} images in {save_path}). Skipping.")
+    exit(0)
+
 # Load CIFAR10 from HuggingFace
 dataset = load_dataset("uoft-cs/cifar10", split="train")
 
