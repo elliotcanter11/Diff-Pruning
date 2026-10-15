@@ -1,5 +1,20 @@
 __version__ = "0.17.0.dev0"
 
+try:
+    import huggingface_hub
+    _orig_hf_hub_download = getattr(huggingface_hub, "hf_hub_download", None)
+    if _orig_hf_hub_download is not None and not getattr(huggingface_hub, "_diffusers_patched", False):
+        def _compat_hf_hub_download(*args, **kwargs):
+            if "use_auth_token" in kwargs:
+                token = kwargs.pop("use_auth_token")
+                if token is not None and "token" not in kwargs:
+                    kwargs["token"] = token
+            return _orig_hf_hub_download(*args, **kwargs)
+        huggingface_hub.hf_hub_download = _compat_hf_hub_download
+        huggingface_hub._diffusers_patched = True
+except ImportError:
+    pass
+
 from .configuration_utils import ConfigMixin
 from .utils import (
     OptionalDependencyNotAvailable,

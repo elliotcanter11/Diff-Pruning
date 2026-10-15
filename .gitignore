@@ -1,8 +1,10 @@
 # Initially taken from Github's Python gitignore file
 
-run2
-run
-pretrained
+# Generated outputs, datasets, and pretrained checkpoints
+run/
+run*/
+pretrained/
+data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

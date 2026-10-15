@@ -27,11 +27,21 @@ Usage:
 import argparse
 import glob
 import json
+import math
 import os
 import re
 import subprocess
 import sys
 import time
+
+# Ensure child commands use this python environment and find the local diffusers package
+_repo_root = os.path.dirname(os.path.abspath(__file__))
+_py_bin_dir = os.path.dirname(os.path.abspath(sys.executable))
+if not os.environ.get("PATH", "").startswith(_py_bin_dir):
+    os.environ["PATH"] = f"{_py_bin_dir}{os.path.pathsep}{os.environ.get('PATH', '')}"
+_cur_ppath = os.environ.get("PYTHONPATH", "")
+if _repo_root not in _cur_ppath.split(os.path.pathsep):
+    os.environ["PYTHONPATH"] = f"{_repo_root}{os.path.pathsep}{_cur_ppath}" if _cur_ppath else _repo_root
 
 
 ALL_METHODS = ["magnitude", "mi_adjacency", "mi_output", "mi_mid", "mi_combined"]
@@ -367,11 +377,11 @@ def print_results_table(results, args):
         for c in cols:
             val = r.get(c, float("nan"))
             if c in ["params", "macs"]:
-                row += f"{val:10.2f}" if not os.path.isnan(val) else f"{'nan':>10s}"
+                row += f"{val:10.2f}" if not math.isnan(val) else f"{'nan':>10s}"
             elif c in ["ssim", "jaccard", "spearman"]:
-                row += f"{val:10.4f}" if not os.path.isnan(val) else f"{'nan':>10s}"
+                row += f"{val:10.4f}" if not math.isnan(val) else f"{'nan':>10s}"
             elif c == "fid":
-                row += f"{val:10.2f}" if not os.path.isnan(val) else f"{'nan':>10s}"
+                row += f"{val:10.2f}" if not math.isnan(val) else f"{'nan':>10s}"
             else:
                 row += f"{val:10.3f}"
         print(row)
@@ -511,11 +521,20 @@ def main():
     print_results_table(results, args)
 
     # Save JSON results
+    def clean_for_json(obj):
+        if isinstance(obj, float) and math.isnan(obj):
+            return None
+        if isinstance(obj, dict):
+            return {k: clean_for_json(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [clean_for_json(v) for v in obj]
+        return obj
+
     json_path = args.save_json or os.path.join(args.run_dir, "results.json")
     os.makedirs(os.path.dirname(os.path.abspath(json_path)), exist_ok=True)
     with open(json_path, "w") as f:
         json.dump(
-            {
+            clean_for_json({
                 "config": {
                     "ratio": args.ratio,
                     "iters": args.iters,
@@ -524,7 +543,7 @@ def main():
                     "device": args.device,
                 },
                 "results": results,
-            },
+            }),
             f,
             indent=2,
         )
