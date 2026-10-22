@@ -215,13 +215,17 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
     diff = mu1 - mu2
 
     # Product might be almost singular
-    covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
+    covmean = linalg.sqrtm(sigma1.dot(sigma2))
+    if isinstance(covmean, tuple):
+        covmean = covmean[0]
     if not np.isfinite(covmean).all():
         msg = ('fid calculation produces singular product; '
                'adding %s to diagonal of cov estimates') % eps
         print(msg)
         offset = np.eye(sigma1.shape[0]) * eps
         covmean = linalg.sqrtm((sigma1 + offset).dot(sigma2 + offset))
+        if isinstance(covmean, tuple):
+            covmean = covmean[0]
 
     # Numerical error might give slight imaginary component
     if np.iscomplexobj(covmean):

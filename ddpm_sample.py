@@ -44,10 +44,14 @@ if __name__ == "__main__":
     # Test Flops
     pipeline.to(accelerator.device)
     if accelerator.is_main_process:
-        if 'cifar' in args.model_path:
-            example_inputs = {'sample': torch.randn(1, 3, 32, 32).to(accelerator.device), 'timestep': torch.ones((1,)).long().to(accelerator.device)}
-        else:
-            example_inputs = {'sample': torch.randn(1, 3, 256, 256).to(accelerator.device), 'timestep': torch.ones((1,)).long().to(accelerator.device)}
+        sample_size = getattr(pipeline.unet.config, "sample_size", 32)
+        if isinstance(sample_size, int):
+            sample_size = (sample_size, sample_size)
+        in_channels = getattr(pipeline.unet.config, "in_channels", 3)
+        example_inputs = {
+            'sample': torch.randn(1, in_channels, *sample_size).to(accelerator.device),
+            'timestep': torch.ones((1,)).long().to(accelerator.device)
+        }
         macs, params = tp.utils.count_ops_and_params(pipeline.unet, example_inputs)
         print(f"MACS: {macs/1e9} G, Params: {params/1e6} M")
 

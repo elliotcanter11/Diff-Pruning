@@ -14,6 +14,9 @@ Usage:
   # Quick comparison on GPU with 1000 finetune iterations:
   python run_workflow.py --methods magnitude mi_combined --iters 1000 --ssim_samples 1000
 
+  # w/ FID: --compute_fid
+  python run_workflow.py --methods magnitude mi_adjacency --iters 1000 --ssim_samples 1000 --compute_fid
+
   # Full 5-method comparison:
   python run_workflow.py --methods all --ratio 0.3 --iters 1000
 
@@ -44,7 +47,15 @@ if _repo_root not in _cur_ppath.split(os.path.pathsep):
     os.environ["PYTHONPATH"] = f"{_repo_root}{os.path.pathsep}{_cur_ppath}" if _cur_ppath else _repo_root
 
 
-ALL_METHODS = ["magnitude", "mi_adjacency", "mi_output", "mi_mid", "mi_combined"]
+ALL_METHODS = [
+    "magnitude",
+    "taylor",
+    "diffpruning",
+    "mi_adjacency",
+    "mi_output",
+    "mi_mid",
+    "mi_combined",
+]
 
 METHOD_CONFIGS = {
     "magnitude": {
@@ -53,6 +64,14 @@ METHOD_CONFIGS = {
         "w_adj": 0.0,
         "w_mid": 0.0,
         "desc": "Standard magnitude pruning baseline",
+    },
+    "taylor": {
+        "pruner": "taylor",
+        "desc": "First-order Taylor expansion over all timesteps",
+    },
+    "diffpruning": {
+        "pruner": "diff-pruning",
+        "desc": "Diff-Pruning (Taylor expansion with loss thresholding)",
     },
     "mi_adjacency": {
         "pruner": "mi",
@@ -225,6 +244,8 @@ def run_pruning(method_name, cfg, args, save_path):
             f" --mi_num_batches {args.mi_num_batches}"
             f" --mi_num_locations {args.mi_num_locations}"
         )
+    elif cfg["pruner"] == "diff-pruning":
+        cmd += f" --thr {args.thr}"
 
     out = run_command(cmd, desc=f"Pruning with {method_name} ({cfg['desc']})", capture=True)
     
@@ -249,7 +270,7 @@ def run_pruning(method_name, cfg, args, save_path):
 def run_finetuning(method_name, prune_dir, finetune_dir, args):
     """Run ddpm_train.py to finetune the pruned network."""
     os.makedirs(finetune_dir, exist_ok=True)
-    save_steps = min(1000, args.iters)
+    save_steps = getattr(args, "save_model_steps", min(1000, args.iters))
     cmd = (
         f"python ddpm_train.py "
         f"--dataset={args.dataset} "
@@ -305,12 +326,13 @@ def find_final_checkpoint(finetune_dir, prune_dir, use_ema=False):
     raise FileNotFoundError(f"Could not find any checkpoint in {finetune_dir} or {prune_dir}")
 
 
-def run_sampling(method_name, finetune_dir, prune_dir, sample_dir, n_samples, args):
-    """Sample images from the final checkpoint of the finetuned (or raw) pruned model."""
+def run_sampling(method_name, finetune_dir, prune_dir, sample_dir, n_samples, args, ckpt=None, model_path=None):
+    """Sample images from the checkpoint of the finetuned (or raw) pruned model."""
     os.makedirs(sample_dir, exist_ok=True)
     
-    ckpt, model_path = find_final_checkpoint(finetune_dir, prune_dir, use_ema=args.use_ema)
-    log(f"Using final checkpoint: {ckpt}")
+    if ckpt is None or model_path is None:
+        ckpt, model_path = find_final_checkpoint(finetune_dir, prune_dir, use_ema=args.use_ema)
+    log(f"Using checkpoint: {ckpt}")
 
     cmd = (
         f"python ddpm_sample.py "
@@ -347,6 +369,29 @@ def evaluate_fid(sample_dir, fid_stats_path, args):
     print(out.strip())
     fid = parse_metric(r"FID:\s*([\d.]+)", out)
     return fid
+
+
+def load_method_meta(method_dir):
+    """Load metadata/config from meta.json if it exists."""
+    meta_path = os.path.join(method_dir, "meta.json")
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_method_meta(method_dir, meta):
+    """Persist metadata/config to meta.json for resume checks."""
+    meta_path = os.path.join(method_dir, "meta.json")
+    os.makedirs(method_dir, exist_ok=True)
+    try:
+        with open(meta_path, "w") as f:
+            json.dump(meta, f, indent=2)
+    except Exception as e:
+        log(f"Warning: could not save meta.json to {method_dir}: {e}")
 
 
 def print_results_table(results, args):
@@ -420,8 +465,13 @@ def parse_args():
     parser.add_argument("--setup", action="store_true", help="Download CIFAR10 and convert pretrained model if missing")
     parser.add_argument("--skip_finetune", action="store_true", help="Skip finetuning (evaluates raw pruned model)")
     parser.add_argument("--force_resample_baseline", action="store_true", help="Force re-sampling pretrained baseline")
+    parser.add_argument("--resume", action="store_true", default=False, help="Resume previous runs by skipping stages whose outputs match current configs")
+    parser.add_argument("--force_resample", action="store_true", default=False, help="Force re-sampling method images even when resuming")
     parser.add_argument("--save_json", type=str, default=None, help="Path to save results JSON (default: <run_dir>/results.json)")
     parser.add_argument("--use_ema", action="store_true", default=False, help="Enable EMA during finetuning (default: False; uses final checkpoint)")
+
+    # Diff-pruning hyperparams
+    parser.add_argument("--thr", type=float, default=0.05, help="Threshold for diff-pruning stopping criterion")
 
     # MI hyperparams
     parser.add_argument("--mi_num_batches", type=int, default=32, help="Number of calibration batches for MI")
@@ -471,30 +521,88 @@ def main():
         log("=" * 80, bold=True)
 
         # Method output directories (isolated per method so past runs aren't lost)
-        prune_dir = os.path.join(args.run_dir, "methods", name, "pruned")
-        finetune_dir = os.path.join(args.run_dir, "methods", name, "finetuned")
-        sample_dir = os.path.join(args.run_dir, "methods", name, "sample")
+        method_dir = os.path.join(args.run_dir, "methods", name)
+        prune_dir = os.path.join(method_dir, "pruned")
+        finetune_dir = os.path.join(method_dir, "finetuned")
+        sample_dir = os.path.join(method_dir, "sample")
+        meta = load_method_meta(method_dir)
 
         # Step 1: Pruning
         t0 = time.time()
-        prune_metrics = run_pruning(name, cfg, args, prune_dir)
+        pruned_ckpt = os.path.join(prune_dir, "pruned", "unet_pruned.pth")
+        prune_matches = (
+            meta.get("ratio") == args.ratio
+            and meta.get("model_path") == args.model_path
+            and "prune_metrics" in meta
+        )
+        if cfg["pruner"] == "diff-pruning":
+            prune_matches = prune_matches and (meta.get("thr") == args.thr)
+
+        if args.resume and os.path.exists(pruned_ckpt) and prune_matches:
+            log(f"  [Resume] Reusing pruned model & metrics (ratio={args.ratio}). Skipping pruning.")
+            prune_metrics = meta["prune_metrics"]
+        else:
+            prune_metrics = run_pruning(name, cfg, args, prune_dir)
+            meta["ratio"] = args.ratio
+            meta["model_path"] = args.model_path
+            if cfg["pruner"] == "diff-pruning":
+                meta["thr"] = args.thr
+            meta["prune_metrics"] = prune_metrics
+            save_method_meta(method_dir, meta)
 
         # Step 2: Finetuning
         if not args.skip_finetune:
-            run_finetuning(name, prune_dir, finetune_dir, args)
+            expected_ckpt = os.path.join(
+                finetune_dir, "pruned",
+                "unet_ema_pruned.pth" if args.use_ema else "unet_pruned.pth"
+            )
+            finetune_matches = (
+                meta.get("iters") == args.iters
+                and meta.get("use_ema") == args.use_ema
+            )
+            if args.resume and os.path.exists(expected_ckpt) and finetune_matches:
+                log(f"  [Resume] Reusing finetuned model ({args.iters} iters, EMA={'on' if args.use_ema else 'off'}). Skipping finetuning.")
+            else:
+                run_finetuning(name, prune_dir, finetune_dir, args)
+                meta["iters"] = args.iters
+                meta["use_ema"] = args.use_ema
+                save_method_meta(method_dir, meta)
         else:
             log("Skipping finetuning (--skip_finetune is set).")
 
         # Step 3: Sampling
-        run_sampling(name, finetune_dir, prune_dir, sample_dir, n_samples, args)
+        existing_samples = count_images_in_dir(sample_dir)
+        sample_matches = (
+            meta.get("ddim_steps") == args.ddim_steps
+            and existing_samples >= n_samples
+        )
+        if args.resume and not args.force_resample and sample_matches:
+            log(f"  [Resume] Reusing {existing_samples} existing samples (target: {n_samples}, ddim_steps: {args.ddim_steps}). Skipping sampling.")
+        else:
+            run_sampling(name, finetune_dir, prune_dir, sample_dir, n_samples, args)
+            meta["ddim_steps"] = args.ddim_steps
+            meta["sample_count"] = count_images_in_dir(sample_dir)
+            save_method_meta(method_dir, meta)
 
         # Step 4: SSIM Evaluation
-        ssim = evaluate_ssim(sample_dir, baseline_dir)
+        if args.resume and meta.get("ssim") is not None and not math.isnan(meta.get("ssim", float("nan"))):
+            ssim = meta["ssim"]
+            log(f"  [Resume] Reusing cached SSIM: {ssim:.4f}")
+        else:
+            ssim = evaluate_ssim(sample_dir, baseline_dir)
+            meta["ssim"] = ssim
+            save_method_meta(method_dir, meta)
 
         # Step 5: Optional FID Evaluation
         fid = float("nan")
         if args.compute_fid:
-            fid = evaluate_fid(sample_dir, fid_stats_path, args)
+            if args.resume and meta.get("fid") is not None and not math.isnan(meta.get("fid", float("nan"))):
+                fid = meta["fid"]
+                log(f"  [Resume] Reusing cached FID: {fid:.2f}")
+            else:
+                fid = evaluate_fid(sample_dir, fid_stats_path, args)
+                meta["fid"] = fid
+                save_method_meta(method_dir, meta)
 
         elapsed = time.time() - t0
         results[name] = {
